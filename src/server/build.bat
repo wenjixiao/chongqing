@@ -1,0 +1,1 @@
+go build server.go shadows_service.go shadow.go games_service.go game_service.go linebroken_service.go domain_data.go msgs.go
