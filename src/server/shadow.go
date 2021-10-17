@@ -37,36 +37,42 @@ func (shadow Shadow) Process(conn net.Conn,msgBytes []byte) {
     case msg_ans_result_head:
         msgAnsResult := &MsgAnsResult{}
         JsonDecode(jsonMsg.Body,msgAnsResult)
-        gameService := games_service.Get(msgAnsResult.Gid)
-        gameService.answerResult(shadow.player.Pid,msgAnsResult.Result,msgAnsResult.Agree)
+        if gameService,ok := games_service.Get(msgAnsResult.Gid); ok {
+            gameService.answerResult(shadow.player.Pid,msgAnsResult.Result,msgAnsResult.Agree)
+        }
         
     case msg_ask_end_head:
         msgAskEnd := &MsgAskEnd{}
         JsonDecode(jsonMsg.Body,msgAskEnd)
-        gameService := games_service.Get(msgAskEnd.Gid)
-        _shadow := shadows_service.Get(gameService.otherPlayer(shadow.player.Pid))
-        WriteMsg(_shadow.conn,msgBytes)
+        if gameService,ok := games_service.Get(msgAskEnd.Gid); ok {
+            if otherShadow,ok := shadows_service.Get(gameService.otherPid(shadow.player.Pid)); ok {
+                WriteMsg(otherShadow.conn,msgBytes)
+            }
+        }
         
     case msg_ans_end_head:
         msgAnsEnd := &MsgAnsEnd{}
         JsonDecode(jsonMsg.Body,msgAnsEnd)
-        gameService := games_service.Get(msgAnsEnd.Gid)
-        if msgAnsEnd.Agree {
-            /* we should compute stones now! */
-            gameService.game_status_changed(Game_Paused)
-            gameService.ask_result(gameService.compute_result())
-        }else{
-            _shadow := shadows_service.Get(gameService.otherPlayer(shadow.player.Pid))
-            WriteMsg(_shadow.conn,msgBytes)
+        if gameService,ok := games_service.Get(msgAnsEnd.Gid); ok {
+            if msgAnsEnd.Agree {
+                /* we should compute stones now! */
+                gameService.game_status_changed(Game_Paused)
+                gameService.ask_result(gameService.compute_result())
+            }else{
+                if otherShadow,ok := shadows_service.Get(gameService.otherPid(shadow.player.Pid)); ok {
+                    WriteMsg(otherShadow.conn,msgBytes)
+                }
+            }
         }
         
     case msg_invite_head:
         msgInvite := &MsgInvitePlayer{}
         JsonDecode(jsonMsg.Body,msgInvite)
-        _shadow := shadows_service.Get(msgInvite.Pid)
-        msgInvite1 := &MsgInvitePlayer{_shadow.player.Pid}
-        msg := &JsonMsg{msg_invite_head,JsonEncode(msgInvite1)}
-        WriteJsonMsg(shadow.conn,msg)
+        if _shadow,ok := shadows_service.Get(msgInvite.Pid); ok {
+            msgInvite1 := &MsgInvitePlayer{_shadow.player.Pid}
+            msg := &JsonMsg{msg_invite_head,JsonEncode(msgInvite1)}
+            WriteJsonMsg(shadow.conn,msg)
+        }
         
     case msg_ask_proto_head:
         //msg ask proto
@@ -82,7 +88,9 @@ func (shadow Shadow) Process(conn net.Conn,msgBytes []byte) {
         if msgAnsProto.Agree {
             //yes
             /* here,triger the action: Game_Preparing -> Game_Running */
-            games_service.Get(msgAnsProto.Gid).setProto(msgAnsProto.Proto)
+            if gameService,ok := games_service.Get(msgAnsProto.Gid); ok { 
+                gameService.setProto(msgAnsProto.Proto)
+            }
         }else {
             //no
             shadow.sendOtherPlayer(msgAnsProto.Gid,msgBytes)
@@ -93,7 +101,9 @@ func (shadow Shadow) Process(conn net.Conn,msgBytes []byte) {
 //---------------------------------------------------------
 //msg_hand
 func (shadow *Shadow) inMsgHand(ms MsgHand) {
-    games_service.Get(ms.Gid).hand(shadow.player.Pid,ms.Hand)
+    if gameService,ok := games_service.Get(ms.Gid); ok { 
+        gameService.hand(shadow.player.Pid,ms.Hand)
+    }
 }
 
 func (shadow *Shadow) outMsgHand(gid Gid,hand Hand) {
@@ -104,7 +114,9 @@ func (shadow *Shadow) outMsgHand(gid Gid,hand Hand) {
 //---------------------------------------------------------
 //msg_tick
 func (shadow *Shadow) inMsgTick(msgTick MsgTick) {
-    games_service.Get(msgTick.Gid).tick(shadow.player.Pid,msgTick.Time)
+    if gameService,ok := games_service.Get(msgTick.Gid); ok {
+        gameService.tick(shadow.player.Pid,msgTick.Time)
+    }
 }
 
 func (shadow *Shadow) outMsgTick(gid Gid,time Time) {
@@ -114,7 +126,9 @@ func (shadow *Shadow) outMsgTick(gid Gid,time Time) {
 }
 //---------------------------------------------------------
 func (shadow Shadow) inInvite(pid Pid) {
-    shadows_service.Get(pid).outInvite(shadow.player.Pid)
+    if myshadow,ok := shadows_service.Get(pid); ok {
+        myshadow.outInvite(shadow.player.Pid)
+    }
 }
 
 func (shadow Shadow) outInvite(pid Pid) {
@@ -129,7 +143,7 @@ func (shadow Shadow) askResult(gid Gid,result Result){
     WriteJsonMsg(shadow.conn,msg)
 }
 
-func (shadow Shadow) playerJoin(gid Gid,pid Pid) {
+func (shadow Shadow) playerJoin(gid Gid,player Player) {
 }
 
 func (shadow Shadow) playerUnjoin(gid Gid,pid Pid) {
@@ -144,18 +158,21 @@ func (shadow *Shadow) gameStatusChanged(gid Gid,status byte) {
 //---------------------------------------------------------
 //msg_game_data
 func (shadow *Shadow) getGameData(msgGetGameData MsgGetGameData) {
-    gameService := games_service.Get(msgGetGameData.Gid)
-    game_data := gameService.getGameData()
-    msg := &JsonMsg{msg_game_data_head,JsonEncode(game_data)}
-    WriteJsonMsg(shadow.conn,msg)
+    if gameService,ok := games_service.Get(msgGetGameData.Gid); ok {
+        game_data := gameService.getGameData()
+        msg := &JsonMsg{msg_game_data_head,JsonEncode(game_data)}
+        WriteJsonMsg(shadow.conn,msg)
+    }
 }
 //---------------------------------------------------------
 /* send msg to other player of game */
 func (shadow *Shadow) sendOtherPlayer(gid Gid,msgBytes []byte) {
-    gameService := games_service.Get(gid)
-    other := gameService.otherPlayer(shadow.player.Pid)
-    _shadow := shadows_service.Get(other)
-    WriteMsg(_shadow.conn,msgBytes)
+    if gameService,ok := games_service.Get(gid); ok {
+        other := gameService.otherPid(shadow.player.Pid)
+        if otherShadow,ok := shadows_service.Get(other); ok {
+            WriteMsg(otherShadow.conn,msgBytes)
+        }
+    }
 }
 //---------------------------------------------------------
 /* when we agree a proto,we should tell every player the proto by the game_service */

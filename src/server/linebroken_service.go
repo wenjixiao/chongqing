@@ -41,7 +41,7 @@ func (ls *LinebrokenService) start() {
                         for _,gameService := range games_service.ListGameServices(pid) {
                             result := Result{} //make a result,because player timeout
                             result.EndType = LineBroken
-                            result.Winner = gameService.getColor(gameService.otherPlayer(pid))
+                            result.Winner = gameService.getColor(gameService.otherPid(pid))
                             /* timeout,has result now,game should over */
                             gameService.setResult(result)
                         }

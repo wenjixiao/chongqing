@@ -2,7 +2,6 @@ package main
 
 import (
     "fmt"
-    "os"
     )
 
 //---------------------------------------------------------
@@ -18,15 +17,21 @@ func (ss ShadowsService) Put(pid Pid,shadow *Shadow) {
 
 //---------------------------------------------------------
 //get shadow service
-type param2 struct {
-    pid Pid
-    ch_result chan *Shadow
+type result2 struct {
+    shadow *Shadow
+    ok bool
 }
 
-func (ss ShadowsService) Get(pid Pid) *Shadow {
-    ch_result := make(chan *Shadow)
+type param2 struct {
+    pid Pid
+    ch_result chan result2
+}
+
+func (ss ShadowsService) Get(pid Pid) (*Shadow,bool) {
+    ch_result := make(chan result2)
     ss.ch_service2 <- param2{pid,ch_result}
-    return <- ch_result
+    result := <- ch_result
+    return result.shadow,result.ok
 }
 
 //---------------------------------------------------------
@@ -55,12 +60,8 @@ func (ss *ShadowsService) start() {
                 
             case param := <- ss.ch_service2:
                 //Get
-                if shadow,ok := ss.pid2shadow[param.pid]; ok {
-                    param.ch_result <- shadow
-                }else{
-                    fmt.Println("error: can't find shadow of pid=",param.pid)
-                    os.Exit(1)
-                }
+                shadow,ok := ss.pid2shadow[param.pid]
+                param.ch_result <- result2{shadow,ok} 
                 
             case ch_result := <- ss.ch_service3:
                 //List

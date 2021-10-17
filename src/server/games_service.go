@@ -1,10 +1,5 @@
 package main
 
-import (
-    "fmt"
-    "os"
-    )
-
 //---------------------------------------------------------
 //put game serivce
 func (gss *GamesService) Put(gameService *GameService) {
@@ -12,15 +7,21 @@ func (gss *GamesService) Put(gameService *GameService) {
 }
 //---------------------------------------------------------
 //get gameService
-type gid_param struct {
-    gid Gid
-    ch_result chan *GameService
+type get_result struct {
+    gameService *GameService
+    ok bool
 }
 
-func (gss *GamesService) Get(gid Gid) *GameService {
-    ch_result := make(chan *GameService)
-    gss.ch_get_gameservice <- gid_param{gid,ch_result}
-    return <- ch_result
+type get_param struct {
+    gid Gid
+    ch_result chan get_result
+}
+
+func (gss *GamesService) Get(gid Gid) (*GameService,bool) {
+    ch_result := make(chan get_result)
+    gss.ch_get_gameservice <- get_param{gid,ch_result}
+    result := <- ch_result
+    return result.gameService,result.ok
 }
 //---------------------------------------------------------
 func (gss *GamesService) List() []*GameService {
@@ -29,14 +30,14 @@ func (gss *GamesService) List() []*GameService {
     return <- ch_result
 }
 //---------------------------------------------------------
-type player_param struct {
-    player Pid
+type pid_param struct {
+    pid Pid
     ch_result chan []*GameService
 }
 
 func (gss *GamesService) ListGameServices(pid Pid) []*GameService {
     ch_result := make(chan []*GameService)
-    gss.ch_player_gameservice <- player_param{pid,ch_result}
+    gss.ch_pid_gameservice <- pid_param{pid,ch_result}
     return <- ch_result
 }
 //---------------------------------------------------------
@@ -45,9 +46,9 @@ func (gss *GamesService) start() {
     gss.gid2gameservice = make(map[Gid]*GameService)
     
     gss.ch_put_gameservice = make(chan *GameService,3)
-    gss.ch_get_gameservice = make(chan gid_param,3)
+    gss.ch_get_gameservice = make(chan get_param,3)
     gss.ch_list_gameservice = make(chan chan []*GameService,3)
-    gss.ch_player_gameservice = make(chan player_param,3) //get player serivces
+    gss.ch_pid_gameservice = make(chan pid_param,3) //get player serivces
     
     go func(){
         for {
@@ -58,12 +59,8 @@ func (gss *GamesService) start() {
                 
             case param := <- gss.ch_get_gameservice:
                 //get
-                if gameService,ok := gss.gid2gameservice[param.gid]; ok {
-                    param.ch_result <- gameService
-                }else{
-                    fmt.Println("error: no GameService of gid=",param.gid)
-                    os.Exit(1)
-                }
+                gameService,ok := gss.gid2gameservice[param.gid]
+                param.ch_result <- get_result{gameService,ok}
                 
             case ch_result := <- gss.ch_list_gameservice:
                 //list
@@ -73,11 +70,11 @@ func (gss *GamesService) start() {
                 }
                 ch_result <- gameServices
                 
-            case param := <- gss.ch_player_gameservice:
+            case param := <- gss.ch_pid_gameservice:
                 //player in game services
                 var gameServices []*GameService
                 for _,gameService := range gss.gid2gameservice {
-                    if gameService.hasPlayer(param.player) {
+                    if gameService.hasPid(param.pid) {
                         gameServices = append(gameServices,gameService)
                     }
                 }
@@ -90,8 +87,8 @@ func (gss *GamesService) start() {
 type GamesService struct {
     gid2gameservice map[Gid]*GameService
     ch_put_gameservice chan *GameService //put game service
-    ch_get_gameservice chan gid_param //get game service
+    ch_get_gameservice chan get_param //get game service
     ch_list_gameservice chan chan []*GameService //list game service
-    ch_player_gameservice chan player_param //game serivces who has player
+    ch_pid_gameservice chan pid_param //game serivces who has player
 }
 //---------------------------------------------------------

@@ -8,56 +8,56 @@ import (
     "os"
 )
 
-type PlayerResultAgree struct {
-    player Pid
+type PidResultAgree struct {
+    pid Pid
     result Result
     agree bool
 }
 /* collect two pid's agree or not of the game's result */
-func (gs GameService) answerResult(player Pid,result Result,agree bool) {
-    gs.ch_player_result_agree <- PlayerResultAgree{player,result,agree}
+func (gs GameService) answerResult(pid Pid,result Result,agree bool) {
+    gs.ch_pid_result_agree <- PidResultAgree{pid,result,agree}
 }
 
 //add hand service
 type HandParam struct {
-    player Pid
+    pid Pid
     hand Hand
 }
                                                                  
 /* hand */
-func (gs *GameService) hand(player Pid,hand Hand) {
-    gs.ch_hand <- HandParam{player,hand}
+func (gs *GameService) hand(pid Pid,hand Hand) {
+    gs.ch_hand <- HandParam{pid,hand}
 }
 
 //time tick
 type TickParam struct {
-    player Pid
+    pid Pid
     time Time
 }
 
 /* tick */
-func (gs *GameService) tick(player Pid,time Time) {
-    gs.ch_tick <- TickParam{player,time}
+func (gs *GameService) tick(pid Pid,time Time) {
+    gs.ch_tick <- TickParam{pid,time}
 }
 
 /* linebroken */
-func (gs *GameService) linebroken(player Pid){
-    gs.ch_linebroken <- player
+func (gs *GameService) linebroken(pid Pid){
+    gs.ch_linebroken <- pid
 }
 
 /* comeback */
-func (gs *GameService) comeback(player Pid){
-    gs.ch_comeback <- player
+func (gs *GameService) comeback(pid Pid){
+    gs.ch_comeback <- pid
 }
 
 /* join */
-func (gs *GameService) join(player Pid){
+func (gs *GameService) join(player Player){
     gs.ch_join <- player
 }
 
 /* unjoin */
-func (gs *GameService) unjoin(player Pid){
-    gs.ch_unjoin <- player
+func (gs *GameService) unjoin(pid Pid){
+    gs.ch_unjoin <- pid
 }
 
 /* set proto */
@@ -78,46 +78,46 @@ func (gs *GameService) getGameData() *MsgGameData {
     return <- ch_result
 }
 
-type OtherPlayersParam struct {
-    player Pid
+type OtherPidsParam struct {
+    pid Pid
     ch_result chan []Pid
 }
 
 /* one pid + all watchers */
-func (gs *GameService) getOtherPlayers(player Pid) []Pid {
+func (gs *GameService) getOtherPids(pid Pid) []Pid {
     ch_result := make(chan []Pid,3)
-    gs.ch_other_players <- OtherPlayersParam{player,ch_result}
+    gs.ch_other_pids <- OtherPidsParam{pid,ch_result}
     return <- ch_result
 }
 
 /* when we start a game,we must have a game id and two pids */
-func (gs *GameService) start(gid Gid,players [2]Pid) {
+func (gs *GameService) start(gid Gid,players [2]Player) {
     gs.gid = gid
     gs.players = players
     gs.status = Game_Preparing
     gs.hands = []Hand{}
-    gs.watchers = []Pid{}
+    gs.watchers = []Player{}
     
     gs.ch_linebroken = make(chan Pid,3)
     gs.ch_comeback = make(chan Pid,3)
     gs.ch_hand = make(chan HandParam,3)
     gs.ch_tick = make(chan TickParam,3)
-    gs.ch_join = make(chan Pid,3)
+    gs.ch_join = make(chan Player,3)
     gs.ch_unjoin = make(chan Pid,3)
     gs.ch_game_data = make(chan chan *MsgGameData,3)
-    gs.ch_other_players = make(chan OtherPlayersParam,3)
+    gs.ch_other_pids = make(chan OtherPidsParam,3)
     gs.ch_proto = make(chan Proto,3)
     gs.ch_result = make(chan Result,3)
-    gs.ch_player_result_agree = make(chan PlayerResultAgree,3)
+    gs.ch_pid_result_agree = make(chan PidResultAgree,3)
     
     go func(){
         
-        var my_pras []PlayerResultAgree
+        var my_pras []PidResultAgree
         
         for {
             select {
                 
-            case pra := <- gs.ch_player_result_agree:
+            case pra := <- gs.ch_pid_result_agree:
                 //pid agree the result?
                 my_pras = append(my_pras,pra)
                 if len(my_pras) == 2 {
@@ -125,7 +125,7 @@ func (gs *GameService) start(gid Gid,players [2]Pid) {
                         /* you two agree the result,now game over */
                         gs.set_result(my_pras[0].result)
                     }else{
-                        my_pras = []PlayerResultAgree{}
+                        my_pras = []PidResultAgree{}
                         gs.game_status_changed(Game_Running)   
                     }
                 }
@@ -134,32 +134,36 @@ func (gs *GameService) start(gid Gid,players [2]Pid) {
                 //add hand
                 gs.hands = append(gs.hands,param.hand)
                 //
-                for _,player := range gs.otherPlayers(param.player) {
-                    shadows_service.Get(player).outMsgHand(gs.gid,param.hand)
+                for _,pid := range gs.otherPids(param.pid) {
+                    if myshadow,ok := shadows_service.Get(pid); ok {
+                        myshadow.outMsgHand(gs.gid,param.hand)
+                    }
                 }
                 
             case param := <- gs.ch_tick:
                 //time tick
                 //update time
-                if i,ok := gs.indexOf(param.player); ok {
+                if i,ok := gs.indexOf(param.pid); ok {
                     gs.times[i] = param.time
                 }
                 //
-                for _,player := range gs.otherPlayers(param.player) {
-                    shadows_service.Get(player).outMsgTick(gs.gid,param.time)
+                for _,pid := range gs.otherPids(param.pid) {
+                    if myshadow,ok := shadows_service.Get(pid); ok {
+                        myshadow.outMsgTick(gs.gid,param.time)
+                    }
                 }
                 
-            case player := <- gs.ch_linebroken:
+            case pid := <- gs.ch_linebroken:
                 //linebroken
-                if i,ok := gs.indexOf(player); ok {
+                if i,ok := gs.indexOf(pid); ok {
                     gs.linebrokens[i] = true
                 }
                 //tell everybody ,game paused!
                 gs.game_status_changed(Game_Paused)
                 
-            case player := <- gs.ch_comeback:
+            case pid := <- gs.ch_comeback:
                 //comeback
-                if i,ok := gs.indexOf(player); ok {
+                if i,ok := gs.indexOf(pid); ok {
                     gs.linebrokens[i] = false
                     //have a look,if can restart
                     if gs.linebrokens[0]==false && gs.linebrokens[1]==false {
@@ -170,17 +174,19 @@ func (gs *GameService) start(gid Gid,players [2]Pid) {
                 
             case player := <- gs.ch_join:
                 //first tell every client,we should add one pid in watchers
-                for _,p := range gs.allPlayers() {
-                    shadows_service.Get(p).playerJoin(gs.gid,p)
+                for _,pid := range gs.allPids() {
+                    if myshadow,ok := shadows_service.Get(pid); ok {
+                        myshadow.playerJoin(gs.gid,player)
+                    }
                 }
                 //then,i change too
                 gs.watchers = append(gs.watchers,player)
                 
-            case player := <- gs.ch_unjoin:
+            case pid := <- gs.ch_unjoin:
                 //first,remove the pid from watchers
                 var index int = -1
-                for i,p := range gs.watchers {
-                    if p == player {
+                for i,player := range gs.watchers {
+                    if player.Pid == pid {
                         index = i
                         break
                     }
@@ -189,24 +195,28 @@ func (gs *GameService) start(gid Gid,players [2]Pid) {
                     gs.watchers = append(gs.watchers[:index],gs.watchers[index+1:]...)
                 }
                 //tell the left players , someone gone
-                for _,p := range gs.allPlayers() {
-                    shadows_service.Get(p).playerUnjoin(gs.gid,p)
+                for _,mypid := range gs.allPids() {
+                    if myshadow,ok := shadows_service.Get(mypid); ok { 
+                        myshadow.playerUnjoin(gs.gid,pid)
+                    }
                 }
                 
             case ch_result := <- gs.ch_game_data:
                 //get game data
                 ch_result <- gs.get_game_data()
                 
-            case param:= <- gs.ch_other_players:
-                param.ch_result <- gs.otherPlayers(param.player)
+            case param:= <- gs.ch_other_pids:
+                param.ch_result <- gs.otherPids(param.pid)
                 
             case proto := <- gs.ch_proto:
                 //set proto,means game started
                 gs.proto = proto
                 gs.implement_proto()
                 /* tell every pid the proto */
-                for _,player := range gs.allPlayers() {
-                    shadows_service.Get(player).setProto(gs.gid,proto)
+                for _,pid := range gs.allPids() {
+                    if myshadow,ok := shadows_service.Get(pid); ok { 
+                        myshadow.setProto(gs.gid,proto)
+                    }
                 }
                 /* tell game status change too! */
                 gs.game_status_changed(Game_Running)
@@ -223,11 +233,11 @@ func (gs *GameService) start(gid Gid,players [2]Pid) {
 
 type GameService struct {
     gid Gid
-    players [2]Pid
+    players [2]Player
     times [2]Time
     linebrokens [2]bool
     hands []Hand
-    watchers []Pid
+    watchers []Player
     proto Proto
     result Result
     status byte
@@ -236,15 +246,15 @@ type GameService struct {
     //chans
     ch_linebroken chan Pid
     ch_comeback chan Pid
-    ch_join chan Pid
+    ch_join chan Player
     ch_unjoin chan Pid
     ch_hand chan HandParam
     ch_tick chan TickParam
     ch_game_data chan chan *MsgGameData
-    ch_other_players chan OtherPlayersParam
+    ch_other_pids chan OtherPidsParam
     ch_proto chan Proto
     ch_result chan Result
-    ch_player_result_agree chan PlayerResultAgree
+    ch_pid_result_agree chan PidResultAgree
 }
 
 //---------------------------------------------------------
@@ -253,14 +263,14 @@ func (gs GameService) isLinebroken() bool {
     return gs.linebrokens[0] || gs.linebrokens[1]
 }
 
-func (gs GameService) hasPlayer(player Pid) bool {
-    return gs.players[0] == player || gs.players[1] == player
+func (gs GameService) hasPid(pid Pid) bool {
+    return gs.players[0].Pid == pid || gs.players[1].Pid == pid
 }
 
 /* does the pid in game's players array? */
-func (gs GameService) indexOf(player Pid) (index int,ok bool) {
-    for i,p := range gs.players {
-        if p == player {
+func (gs GameService) indexOf(pid Pid) (index int,ok bool) {
+    for i,player := range gs.players {
+        if player.Pid == pid {
             index = i
             ok = true
         }
@@ -268,25 +278,30 @@ func (gs GameService) indexOf(player Pid) (index int,ok bool) {
     return
 }
 
-func (gs GameService) otherPlayer(player Pid) (other Pid) {
-    if gs.players[0] == player {
-        other = gs.players[1]
+func (gs GameService) otherPid(pid Pid) (other Pid) {
+    if gs.players[0].Pid == pid {
+        other = gs.players[1].Pid
     }else{
-        other = gs.players[0]
+        other = gs.players[0].Pid
     }
     return
 }
 
 /* 1 pid + all watchers */
-func (gs GameService) otherPlayers(player Pid) []Pid {
-    other := gs.otherPlayer(player)
-    return append([]Pid{other},gs.watchers...)
+func (gs GameService) otherPids(pid Pid) []Pid {
+    mypids := []Pid{gs.otherPid(pid)}
+    for _,player := range gs.watchers {
+        mypids = append(mypids,player.Pid)
+    }
+    return mypids
 }
 
-func (gs GameService) allPlayers() (all []Pid) {
-    all = append(all,gs.players[0],gs.players[1])
-    all = append(all,gs.watchers...)
-    return                                                           
+func (gs GameService) allPids() []Pid {
+    mypids := []Pid{gs.players[0].Pid,gs.players[1].Pid}
+    for _,player := range gs.watchers {
+        mypids = append(mypids,player.Pid)
+    }
+    return mypids                                  
 }
 
 /* proto like a class,when we use the proto,we should create objects */
@@ -316,7 +331,9 @@ func (gs GameService) compute_result() (result Result) {
 /* when we compute a result of Counting(EndType),we should ask players if agree */
 func (gs GameService) ask_result(result Result) {
     for _,player := range gs.players {
-        shadows_service.Get(player).askResult(gs.gid,result)
+        if myshadow,ok := shadows_service.Get(player.Pid); ok { 
+            myshadow.askResult(gs.gid,result)
+        }
     }
 }
 
@@ -324,24 +341,26 @@ func (gs GameService) ask_result(result Result) {
 func (gs GameService) set_result(result Result) {
     gs.result = result
     /* tell every pid the result */
-    for _,player := range gs.allPlayers() {
-        shadows_service.Get(player).setResult(gs.gid,result)
+    for _,pid := range gs.allPids() {
+        if myshadow,ok := shadows_service.Get(pid); ok { 
+            myshadow.setResult(gs.gid,result)
+        }
     }
     /* tell game status change too! */
     gs.game_status_changed(Game_Stopped)
 }
 
-func (gs GameService) getColor(player Pid) (color Color) {
+func (gs GameService) getColor(pid Pid) (color Color) {
     if gs.proto.Handicap == 0 {
         /* fristIndex is White*/
-        if gs.players[gs.firstIndex] == player {
+        if gs.players[gs.firstIndex].Pid == pid {
             color = White
         }else{
             color = Black
         }
     }else{
         /* fristIndex is Black*/
-        if gs.players[gs.firstIndex] == player {
+        if gs.players[gs.firstIndex].Pid == pid {
             color = Black
         }else{
             color = White
@@ -351,30 +370,17 @@ func (gs GameService) getColor(player Pid) (color Color) {
 }
 
 func (gs GameService) get_game_data() *MsgGameData {
-    pid2player := func(pid Pid) *Player {
-        return shadows_service.Get(pid).player
-    }
-
     game_data := &MsgGameData{}
     game_data.Gid = gs.gid
-    /* game_data.Players */
-    for index,pid := range gs.players {
-        game_data.Players[index] = *pid2player(pid)
-    }
+    game_data.Players = gs.players
     game_data.Times = gs.times
     game_data.Hands = gs.hands
-    /* game_data.Watchers */
-    for index,pid := range gs.watchers {
-        game_data.Watchers[index] = *pid2player(pid)
-    }
+    game_data.Watchers = gs.watchers
     game_data.Proto = gs.proto
     game_data.FirstIndex = gs.firstIndex
     return game_data
 }
 
-func pid2player(pid Pid) *Player {
-    return shadows_service.Get(pid).player
-}
 //---------------------------------------------------------
 //game statuses
 const Game_Preparing byte = 0 //preparing
@@ -385,8 +391,10 @@ const Game_Paused byte = 3 //paused
 /* tell every pid in the game,the change status changed */
 func (gs *GameService) game_status_changed(status byte) {
     gs.status = status
-    for _,player := range gs.allPlayers() {
-        shadows_service.Get(player).gameStatusChanged(gs.gid,gs.status)
+    for _,pid := range gs.allPids() {
+        if myshadow,ok := shadows_service.Get(pid); ok {
+            myshadow.gameStatusChanged(gs.gid,gs.status)
+        }
     }
 }
 //---------------------------------------------------------
